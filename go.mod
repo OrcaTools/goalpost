@@ -1,4 +1,4 @@
-module github.com/orcatools/goalpost
+module github.com/orcatools/orcaq
 
 go 1.13
 

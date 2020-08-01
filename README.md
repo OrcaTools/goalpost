@@ -1,75 +1,10 @@
-# goalpost
+# OrcaQ | A Lightweight Durable Worker Queue
 
-[![Build Status](https://cloud.drone.io/api/badges/chiefnoah/goalpost/status.svg)](https://cloud.drone.io/chiefnoah/goalpost) [![](https://godoc.org/github.com/chiefnoah/goalpost?status.svg)](http://godoc.org/github.com/chiefnoah/goalpost)
+Many thanks to the Original Author for this awesome project!
 
-Goalpost is a durable, embeddable, worker queue for Golang
-
-It makes use of boltdb/bbolt to provide durability so messages don't get lost when the process get's killed.
-
+View it here:
+<a href="https://github.com/chiefnoah/goalpost" target="_blank">https://github.com/chiefnoah/goalpost</a>
 
 
-## Quickstart
-
-Below is a simple use of goalpost:
-
-```golang
-package main
-
-import (
-	"context"
-	"fmt"
-	"time"
-)
-import "github.com/chiefnoah/goalpost"
-
-const eventQueueID = "event-queue"
-
-//Define a type that implements the goalpost.Worker interface
-type worker struct {
-	id string
-}
-
-func (w *worker) ID() string {
-	return w.id
-}
-
-func (w *worker) DoWork(ctx context.Context, j *goalpost.Job) error {
-	//do something cool!
-	fmt.Printf("Hello, %s\n", j.Data)
-	//Something broke, but we should retry it...
-	if j.RetryCount < 9 { //try 10 times
-		return goalpost.NewRecoverableWorkerError("Something broke, try again")
-	}
-
-	//Something *really* broke, don't retry
-	//return errors.New("Something broke, badly")
-
-	//Everything's fine, we're done here
-	return nil
-}
-
-func main() {
-
-	//Init a queue
-	q, _ := goalpost.Init(eventQueueID)
-	//remember to handle your errors :)
-
-	//Create a worker with id "worker-id"
-	w := &worker{
-		id: "worker-1",
-	}
-	//register the worker, so it can do work
-	q.RegisterWorker(w)
-
-	//Let's do some work...
-	q.PushBytes([]byte("World"))
-	//You should see "Hello, World" printed 10 times
-
-	//Make sure your process doesn't exit before your workers can do their work
-	time.Sleep(10 * time.Second)
-
-	//Remember to close your queue when you're done using it
-	q.Close()
-}
-```
-
+## TODO:
+- convert queue to use nutsdb in favor of boltdb
