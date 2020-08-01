@@ -21,7 +21,7 @@ const (
 type Job struct {
 	Status JobStatus
 	//Unique identifier for a Job
-	ID uint64
+	ID []byte // this will be a UUID, stored as bytes.
 	//Data contains the bytes that were pushed using Queue.PushBytes()
 	Data []byte
 	//RetryCount is the number of times the job has been retried
