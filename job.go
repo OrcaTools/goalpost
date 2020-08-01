@@ -4,22 +4,13 @@ import (
 	"bytes"
 	"encoding/gob"
 	"fmt"
-)
-
-//JobStatus is a enumerated int representing the processing status of a Job
-type JobStatus int
-
-// JobStatus types
-const (
-	Ack JobStatus = iota + 1
-	Uack
-	Nack
-	Failed
+	"time"
 )
 
 //Job wraps arbitrary data for processing
 type Job struct {
-	Status JobStatus
+	Label  string // optional human friendly label
+	Status string
 	//Unique identifier for a Job
 	ID []byte // this will be a UUID, stored as bytes.
 	//Data contains the bytes that were pushed using Queue.PushBytes()
@@ -32,6 +23,8 @@ type Job struct {
 	//Message is primarily used for debugging. It conatains status info
 	//about what was last done with the job.
 	Message string
+	//Deadline is the time by when the job should be executed.
+	Deadline time.Time
 }
 
 //DecodeJob decodes a gob encoded byte array into a Job struct and returns a pointer to it

@@ -64,7 +64,7 @@ func Init(filepath string) (*Queue, error) {
 	//resume stopped jobs, clean completed, failed jobs
 	err = q.processJobs()
 	if err != nil {
-		log.Printf("Unable to resume jobs from bucket: %s", err)
+		log.Infof("Unable to resume jobs from bucket: %s", err)
 	}
 	return q, nil
 }
@@ -85,31 +85,33 @@ func (q *Queue) Close() error {
 func (q *Queue) registerWorkerWithContext(ctx context.Context, w Worker) {
 	q.workers = append(q.workers, &w)
 	q.wg.Add(1)
-	log.Printf("Registering worker with ID: %s", w.ID())
+	log.Infof("Registering worker with ID: %s", w.ID())
 	//The big __main loop__ for workers.
 	go func() {
-		log.Printf("Starting up new worker...")
+		log.Infof("Starting up new worker...")
 		var jobID []byte
 		for {
 			// receive a notification from the queue chan
 			select {
 			case <-ctx.Done():
-				log.Printf("Received signal to shutdown worker. Exiting.")
+				log.Infof("Received signal to shutdown worker. Exiting.")
 				q.wg.Done()
 				return
 			case jobID = <-q.notifier:
-				log.Printf("Received job id %v", string(jobID))
-				err := q.updateJobStatus(jobID, Uack, fmt.Sprintf("Picked up by %s", w.ID()))
+				// NOTE: maybe we can show the human friendly job name if it exist?
+				log.Infof("Received job id %v", string(jobID))
+
+				err := q.updateJobStatus(jobID, "processing", fmt.Sprintf("worker %s assigned", w.ID()), 0)
 				if err != nil {
-					log.Printf("Unable to update job status: %s", err)
+					log.Errorf("Unable to update job status: %s", err)
 					continue
 				}
 				//If subsequent calls to updateJobStatus fail, the whole thing is probably hosed and
 				//it should probably do something more drastic for error handling.
 				job, err := q.GetJobByID(jobID)
 				if err != nil {
-					log.Printf("Error processing job: %s", err)
-					q.updateJobStatus(jobID, Failed, err.Error())
+					log.Infof("Error processing job: %s", err)
+					q.updateJobStatus(jobID, "failed", err.Error(), 60) // todo configure job duration setting?
 					continue
 				}
 				// Call the worker func handling this job
@@ -118,19 +120,19 @@ func (q *Queue) registerWorkerWithContext(ctx context.Context, w Worker) {
 					_, ok := err.(RecoverableWorkerError)
 					if ok {
 						//temporary error, retry
-						log.Printf("Received temporary error: %s. Retrying...", err.Error())
-						q.updateJobStatus(jobID, Nack, err.Error())
+						log.Infof("Received temporary error: %s. Retrying...", err.Error())
+						q.updateJobStatus(jobID, "nack", err.Error(), 0)
 					} else {
-						log.Printf("Permanent error received from worker: %s", err)
+						log.Infof("Permanent error received from worker: %s", err)
 						//permanent error, mark as failed
-						q.updateJobStatus(jobID, Failed, err.Error())
+						q.updateJobStatus(jobID, "faield", err.Error(), 60)
 					}
 				} else {
-					q.updateJobStatus(jobID, Ack, "Complete")
+					q.updateJobStatus(jobID, "complete", "", 60)
 				}
-				log.Printf("Finished processing job %v", string(jobID))
+				log.Infof("Finished processing job %v", string(jobID))
 			default:
-				// log.Printf("Worker: %s. No message to queue. Sleeping 500ms", w.ID())
+				// log.Infof("Worker: %s. No message to queue. Sleeping 500ms", w.ID())
 				time.Sleep(q.PollRate)
 			}
 		}
@@ -146,11 +148,13 @@ func (q *Queue) RegisterWorker(w Worker) {
 }
 
 //PushBytes wraps arbitrary binary data in a job and pushes it onto the queue
-func (q *Queue) PushBytes(d []byte) ([]byte, error) {
+func (q *Queue) PushBytes(label string, deadline time.Time, data []byte) ([]byte, error) {
 	job := &Job{
-		Status:     Uack,
-		Data:       d,
+		Label:      label,
+		Status:     "pending",
+		Data:       data,
 		RetryCount: 0,
+		Deadline:   deadline,
 	}
 	return q.PushJob(job)
 }
@@ -160,13 +164,13 @@ func (q *Queue) PushBytes(d []byte) ([]byte, error) {
 func (q *Queue) PushJob(j *Job) ([]byte, error) {
 	err := q.db.Update(func(tx *nutsdb.Tx) error {
 		j.ID = []byte(uuid.NewV4().String())
-		log.Printf("Storing job %v for processing", string(j.ID))
+		log.Infof("Storing job %v for processing", string(j.ID))
 		err := tx.Put(jobsBucketName, j.ID, j.Bytes(), 0) // setting this to 0 means never expires.
 		// NOTE: we can support jobs with a ttl. If the ttl expires, then the job is removed from the queue.
 		return err
 	})
 	if err != nil {
-		log.Printf("Unable to push job to queue: %s", err)
+		log.Errorf("Unable to push job to queue: %s", err)
 		return nil, err
 	}
 	q.notifier <- j.ID
@@ -188,7 +192,7 @@ func (q *Queue) GetJobByID(id []byte) (*Job, error) {
 }
 
 //updateJobStatus updates the processing status of a job
-func (q *Queue) updateJobStatus(id []byte, status JobStatus, message string) error {
+func (q *Queue) updateJobStatus(id []byte, status string, message string, ttl uint32) error {
 	err := q.db.Update(func(tx *nutsdb.Tx) error {
 		e, err := tx.Get(jobsBucketName, id)
 		if err != nil {
@@ -197,13 +201,13 @@ func (q *Queue) updateJobStatus(id []byte, status JobStatus, message string) err
 		job := DecodeJob(e.Value)
 		job.Status = status
 		job.Message = message
-		if status == Nack {
+		if status == "nack" {
 			job.RetryCount++
 		}
-		return tx.Put(jobsBucketName, job.ID, job.Bytes(), 0)
+		return tx.Put(jobsBucketName, job.ID, job.Bytes(), ttl)
 	})
 
-	if status == Nack && err == nil {
+	if status == "nack" && err == nil {
 		q.notifier <- id
 	}
 	return err
@@ -220,10 +224,10 @@ func (q *Queue) processJobs() error {
 		for _, entry := range entries {
 			job := DecodeJob(entry.Value)
 			switch job.Status {
-			case Uack:
-			case Nack:
+			case "processing":
+			case "nack":
 				break
-			case Failed:
+			case "failed":
 				err := tx.Delete(jobsBucketName, job.ID)
 				if err != nil {
 					log.Errorf("Unable to delete failed job %v from queue.", string(job.ID))
@@ -231,7 +235,7 @@ func (q *Queue) processJobs() error {
 				}
 				log.Infof("removed failed job %v from queue", string(job.ID))
 				break
-			case Ack:
+			case "complete":
 				err := tx.Delete(jobsBucketName, job.ID)
 				if err != nil {
 					log.Errorf("Unable to delete completed job %v from queue.", string(job.ID))
@@ -246,8 +250,8 @@ func (q *Queue) processJobs() error {
 }
 
 // ListJobs will return a list of jobs within the queue
-func (q *Queue) ListJobs() (map[string]interface{}, error) {
-	r := map[string]interface{}{}
+func (q *Queue) ListJobs() ([]*Job, error) {
+	var jobList []*Job
 	err := q.db.View(func(tx *nutsdb.Tx) error {
 		entries, err := tx.GetAll(jobsBucketName)
 		if err != nil {
@@ -255,12 +259,12 @@ func (q *Queue) ListJobs() (map[string]interface{}, error) {
 		}
 		for _, entry := range entries {
 			job := DecodeJob(entry.Value)
-			r[string(job.ID)] = job
+			jobList = append(jobList, job)
 		}
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	return r, nil
+	return jobList, nil
 }
