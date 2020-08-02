@@ -7,6 +7,7 @@ View it here:
 
 
 ## TODO:
+
 - convert queue to use nutsdb in favor of boltdb
 - add 'schedule' job feature, to schedule jobs into the future
 - add 'repeat' job feature, to repeat the job X number of times
@@ -15,3 +16,4 @@ View it here:
 - add human friendly label to a job
 - update test to reflect changes to package
 
+- add audit log to job and task state
