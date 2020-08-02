@@ -55,4 +55,12 @@ func (t *Task) Run() {
 		Message: fmt.Sprintf("task completed"),
 		Time:    time.Now(),
 	})
+	t.AuditLog = append(t.AuditLog, &AuditMessage{
+		Message: fmt.Sprintf("stdout: %v", string(t.Stdout.Bytes())),
+		Time:    time.Now(),
+	})
+	t.AuditLog = append(t.AuditLog, &AuditMessage{
+		Message: fmt.Sprintf("stderr: %v", string(t.Stderr.Bytes())),
+		Time:    time.Now(),
+	})
 }
