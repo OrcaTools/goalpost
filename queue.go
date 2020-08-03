@@ -94,10 +94,10 @@ func (q *Queue) RegisterWorker(w Worker) {
 func (q *Queue) registerWorkerWithContext(ctx context.Context, w Worker) {
 	q.workers = append(q.workers, &w)
 	q.wg.Add(1)
-	log.Infof("worker %s registered to queue", w.ID())
+	log.Infof("%s registered to queue", w.ID())
 	//The big __main loop__ for workers.
 	go func() {
-		log.Infof("new worker coming online...")
+		log.Infof("%s is now available", w.ID())
 		var jobID []byte
 		for {
 			// receive a notification from the queue chan
